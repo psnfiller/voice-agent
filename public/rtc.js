@@ -49,7 +49,7 @@ async function main() {
   // Accumulate function call arguments for tool calls
   const pendingArgs = new Map();
 
-  async function runShell(args, callId) {
+  async function runShell(args, callId, responseId) {
     // UI log area
     const logEl = document.getElementById('log');
     const clearBtn = document.getElementById('clear');
@@ -78,32 +78,18 @@ async function main() {
       }
       // Send function output back to the model in the newer Realtime schema
       const textOut = out.trim() || '(no output)';
-      const itemEvent = {
-        type: 'conversation.item.create',
-        item: {
-          type: 'function_call_output',
-          call_id: callId,
-          output: [ { type: 'output_text', text: textOut } ],
-        }
-      };
-      console.log('Sending conversation.item.create for function output', itemEvent);
-      dc.send(JSON.stringify(itemEvent));
+      const appendEvent = { type: 'input_text.append', text: `Tool run_shell output (call ${callId}):\n${textOut}` };
+      console.log('Sending input_text.append with tool output');
+      dc.send(JSON.stringify(appendEvent));
       const continueEvent = { type: 'response.create' };
       console.log('Sending response.create to continue');
       dc.send(JSON.stringify(continueEvent));
     } catch (err) {
       const text = `ERROR: ${(err && err.message) || String(err)}`;
       if (logEl) { logEl.textContent += `\n${text}\n`; logEl.scrollTop = logEl.scrollHeight; }
-      const itemEvent = {
-        type: 'conversation.item.create',
-        item: {
-          type: 'function_call_output',
-          call_id: callId,
-          output: [ { type: 'output_text', text } ],
-        }
-      };
-      console.log('Sending conversation.item.create (error) for function output', itemEvent);
-      dc.send(JSON.stringify(itemEvent));
+      const appendEvent = { type: 'input_text.append', text: `Tool run_shell error (call ${callId}):\n${text}` };
+      console.log('Sending input_text.append with tool error');
+      dc.send(JSON.stringify(appendEvent));
       const continueEvent = { type: 'response.create' };
       console.log('Sending response.create to continue after error');
       dc.send(JSON.stringify(continueEvent));
@@ -135,13 +121,14 @@ async function main() {
     }
     if (msg && msg.type === "response.function_call_arguments.done") {
       const id = msg.call_id;
+      const responseId = msg.response_id;
       const name = msg.name;
       let argsStr = msg.arguments || pendingArgs.get(id) || "";
       pendingArgs.delete(id);
       let args = {};
       try { args = argsStr ? JSON.parse(argsStr) : {}; } catch(e) { console.warn("bad function args JSON", e, argsStr); args = {}; }
       if (name === "run_shell") {
-        await runShell(args, id);
+        await runShell(args, id, responseId);
       }
       return;
     }
