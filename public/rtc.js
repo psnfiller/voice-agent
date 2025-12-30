@@ -1,4 +1,23 @@
 async function main() {
+
+  const REMOTE_LOG = false;
+
+  function log(msg, extra) {
+    try {
+      if (extra !== undefined) console.log('[voice-agent]', msg, extra); else console.log('[voice-agent]', msg);
+    } catch(e){}
+    if (!REMOTE_LOG) return;
+    if (extra === undefined) extra = '';
+    const payload = { Msg: String(msg), Req: JSON.stringify(extra) };
+    fetch('/log', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).catch(()=>{});
+  };
+      const r = fetch('/log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+	};
   // Store a reference to the <h1> in a variable
   const myHeading = document.querySelector("h1");
   if (myHeading) myHeading.textContent = "Hello world!";
@@ -12,6 +31,7 @@ async function main() {
   }
   const pc = new RTCPeerConnection({ iceServers: ICE });
   window._pc = pc; // expose for debugging
+	log("created rtc peer", "")
 
   pc.onconnectionstatechange = () => console.log("PC connectionState:", pc.connectionState);
   pc.oniceconnectionstatechange = () => console.log("PC iceConnectionState:", pc.iceConnectionState);
@@ -21,7 +41,7 @@ async function main() {
       console.warn("ICE candidate error:", ev.errorText || ev.errorCode, ev.url || "");
     });
     if (e.candidate) console.log("ICE candidate:", e.candidate.type, e.candidate.protocol);
-    else console.log("ICE candidate gathering complete");
+    else log("ICE candidate gathering complete");
   };
 
   // Set up to play remote audio from the model
@@ -29,25 +49,43 @@ async function main() {
   audioElement.autoplay = true;
   document.body.appendChild(audioElement);
   pc.ontrack = (e) => {
+    // Half-duplex gating: mute mic while remote audio is playing
+    const remoteTrack = e.streams[0]?.getAudioTracks?.()[0];
+    if (remoteTrack) {
+      remoteTrack.onunmute = () => { try { localTrack.enabled = false; log("Mic muted during playback"); } catch(_){} };
+      remoteTrack.onmute = () => { try { localTrack.enabled = true; log("Mic unmuted after playback"); } catch(_){} };
+    }
     console.log("Received remote track");
     audioElement.srcObject = e.streams[0];
     audioElement.play().catch(() => {/* ignore autoplay blocks */});
+    audioElement.addEventListener("playing", () => { try { localTrack.enabled = false; } catch(_){} });
+    audioElement.addEventListener("pause", () => { try { localTrack.enabled = true; } catch(_){} });
   };
 
   // Add local audio track for microphone input in the browser
-  console.log("Requesting microphone...");
-  const ms = await navigator.mediaDevices.getUserMedia({ audio: true });
-  console.log("Microphone granted. Tracks:", ms.getTracks().map(t => t.kind+":"+t.readyState));
+  log("Requesting microphone...");
+  const ms = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false } });
+  const localTrack = ms.getAudioTracks()[0];
+  log("Microphone granted. Tracks:", ms.getTracks().map(t => t.kind+":"+t.readyState));
   pc.addTrack(ms.getTracks()[0]);
 
   // Set up data channel for sending and receiving events
   const dc = pc.createDataChannel("oai-events");
   dc.onopen = () => {
-    console.log("Data channel open");
+    log("Data channel open");
   };
 
   // Accumulate function call arguments for tool calls
   const pendingArgs = new Map();
+
+  function base64ToText(b64) {
+    if (!b64) return '';
+    const binStr = atob(b64);
+    const len = binStr.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) bytes[i] = binStr.charCodeAt(i);
+    return new TextDecoder().decode(bytes);
+  }
 
   async function runShell(args, callId, responseId) {
     // UI log area
@@ -60,29 +98,31 @@ async function main() {
     const cmd = args?.command || '';
     if (logEl) { logEl.textContent += `$ ${cmd}\n`; logEl.scrollTop = logEl.scrollHeight; }
 
+		log("starting tool call", cmd)
     try {
-      const r = await fetch('/tools/shell/stream', {
+      const payload = { Command: ["/bin/bash", "-lc", cmd] };
+      const r = await fetch('/tools', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(args || {}),
+        body: JSON.stringify(payload),
       });
-      const reader = r.body.getReader();
-      const decoder = new TextDecoder();
-      let out = '';
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        out += chunk;
-        if (logEl) { logEl.textContent += chunk; logEl.scrollTop = logEl.scrollHeight; }
+      if (!r.ok) throw new Error(`/tools HTTP ${r.status}`);
+      const data = await r.json();
+      const stdout = base64ToText(data.Stdout);
+      const stderr = base64ToText(data.Stderr);
+      const combined = [stdout, stderr].filter(Boolean).join(stderr && stdout ? "\n" : "");
+      if (combined) {
+        if (logEl) { logEl.textContent += combined + "\n"; logEl.scrollTop = logEl.scrollHeight; }
+      } else {
+        if (logEl) { logEl.textContent += "(no output)\n"; logEl.scrollTop = logEl.scrollHeight; }
       }
       // Send function output back to the model in the newer Realtime schema
-      const textOut = out.trim() || '(no output)';
+      const textOut = (combined || '(no output)').trim();
       const appendEvent = { type: 'input_text.append', text: `Tool run_shell output (call ${callId}):\n${textOut}` };
-      console.log('Sending input_text.append with tool output');
+      log('Sending input_text.append with tool output', appendEvent);
       dc.send(JSON.stringify(appendEvent));
       const continueEvent = { type: 'response.create' };
-      console.log('Sending response.create to continue');
+      log('Sending response.create to continue', continueEvent);
       dc.send(JSON.stringify(continueEvent));
     } catch (err) {
       const text = `ERROR: ${(err && err.message) || String(err)}`;
@@ -94,23 +134,25 @@ async function main() {
       console.log('Sending response.create to continue after error');
       dc.send(JSON.stringify(continueEvent));
     }
+		log("tool call finished");
   }
 
   dc.onmessage = async (event) => {
     try {
       if (typeof event.data === 'string') {
-        console.log('DC message raw:', event.data.slice(0, 300));
+        log('DC message raw:', event.data.slice(0, 300));
       } else {
-        console.log('DC message (binary, len):', event.data?.byteLength || 0);
+        log('DC message (binary, len):', event.data?.byteLength || 0);
       }
-    } catch (e) { console.warn('DC log failed', e); }
+    } catch (e) { log('DC log failed', e); }
 
 
   try {
     // Some events may be binary (audio). Only handle JSON strings here.
     if (typeof event.data !== "string") return;
     const msg = JSON.parse(event.data);
-    console.log('DC message type:', msg?.type, msg);
+    log('DC message type:', msg?.type);
+    // reduced verbose logging
 
     // Handle function call args streaming (new schema)
     if (msg && msg.type === "response.function_call_arguments.delta") {
@@ -136,69 +178,8 @@ async function main() {
     if (!msg || typeof msg !== "object") return;
 
     // Handle tool calls from the model
-    if (msg.type === "tool_call" && msg.name === "run_shell") {
-      const callId = msg.id || msg.tool_call_id || msg.call_id;
-      const args = msg.arguments || {};
-      console.log("Received tool_call run_shell:", { callId, args });
+  // Legacy tool_call handler removed to use new Realtime schema only.
 
-      // Log area
-      const log = document.getElementById('log');
-      const clearBtn = document.getElementById('clear');
-      if (clearBtn && !clearBtn._bound) {
-        clearBtn._bound = true;
-        clearBtn.addEventListener('click', () => { if (log) log.textContent = ''; });
-      }
-
-      const cmd = args.command || '';
-      if (log) { log.textContent += `$ ${cmd}
-`; log.scrollTop = log.scrollHeight; }
-
-      try {
-        // Use streaming endpoint so output appears live in the page
-        const r = await fetch("/tools/shell/stream", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(args),
-        });
-
-        const reader = r.body.getReader();
-        const decoder = new TextDecoder();
-        let out = '';
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          const chunk = decoder.decode(value, { stream: true });
-          out += chunk;
-          if (log) { log.textContent += chunk; log.scrollTop = log.scrollHeight; }
-        }
-
-        const resultEvent = {
-          type: "tool_result",
-          tool_call_id: callId,
-          name: "run_shell",
-          content: [
-            { type: "output_text", text: out.trim() || "(no output)" },
-          ],
-          is_error: false,
-        };
-        dc.send(JSON.stringify(resultEvent));
-      } catch (err) {
-        const text = `ERROR: ${(err && err.message) || String(err)}`;
-        if (log) { log.textContent += `
-${text}
-`; log.scrollTop = log.scrollHeight; }
-        const fallback = {
-          type: "tool_result",
-          tool_call_id: callId,
-          name: "run_shell",
-          content: [
-            { type: "output_text", text },
-          ],
-          is_error: true,
-        };
-        dc.send(JSON.stringify(fallback));
-      }
-    }
   } catch (e) {
     console.warn("Failed to handle data channel message:", e);
   }
