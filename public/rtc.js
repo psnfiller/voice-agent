@@ -39,23 +39,20 @@ async function main() {
   audioElement.autoplay = true;
   document.body.appendChild(audioElement);
   pc.ontrack = (e) => {
-    // Half-duplex gating: mute mic while remote audio is playing
-    const remoteTrack = e.streams[0]?.getAudioTracks?.()[0];
-    if (remoteTrack) {
-      remoteTrack.onunmute = () => { try { localTrack.enabled = false; log("Mic muted during playback"); } catch(_){} };
-      remoteTrack.onmute = () => { try { localTrack.enabled = true; log("Mic unmuted after playback"); } catch(_){} };
-    }
     console.log("Received remote track");
     audioElement.srcObject = e.streams[0];
     audioElement.play().catch(() => {/* ignore autoplay blocks */});
-    audioElement.addEventListener("playing", () => { try { localTrack.enabled = false; } catch(_){} });
-    audioElement.addEventListener("pause", () => { try { localTrack.enabled = true; } catch(_){} });
+    
   };
 
   // Add local audio track for microphone input in the browser
   log("Requesting microphone...");
   const ms = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false } });
   const localTrack = ms.getAudioTracks()[0];
+  localTrack.enabled = true;
+  let ttsActive = false;
+  const ttsStart = () => { if (!ttsActive) { ttsActive = true; try { localTrack.enabled = false; log("Mic muted (TTS start)"); } catch(_){} } };
+  const ttsStop  = () => { if (ttsActive)  { ttsActive = false; try { localTrack.enabled = true;  log("Mic unmuted (TTS stop)"); } catch(_){} } };
   log("Microphone granted. Tracks:", ms.getTracks().map(t => t.kind+":"+t.readyState));
   pc.addTrack(ms.getTracks()[0]);
 
@@ -166,6 +163,12 @@ async function main() {
     }
 
     if (!msg || typeof msg !== "object") return;
+
+    // Simple DC-event-based half-duplex gating
+    try {
+      if (msg.type === "response.output_audio.delta") ttsStart();
+      if (msg.type === "response.output_audio.done" || msg.type === "output_audio_buffer.cleared" || msg.type === "response.done") ttsStop();
+    } catch(_){}
 
     // Handle tool calls from the model
   // Legacy tool_call handler removed to use new Realtime schema only.
