@@ -1,0 +1,10 @@
+# Exclude VCS and local build artifacts
+.git
+node_modules
+npm-debug.log*
+.DS_Store
+
+# Exclude top-level home files if build context is ~/
+../node_modules
+../package-lock.json
+../package.json

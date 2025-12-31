@@ -1,0 +1,24 @@
+ version: "3.8"
+ services:
+  voice-agent:
+    network_mode: service:tailscale
+    build: .
+    image: voice-agent
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+  tailscale:
+     hostname: voice-agent # This will become the tailscale device name
+     image: tailscale/tailscale:stable
+     volumes:
+         - "/dev/net/tun:/dev/net/tun"           # Required for tailscale to work
+     cap_add:                                    # Required for tailscale to work
+       - net_admin
+       - sys_module
+       - net_raw
+
+     environment:
+       - "TS_STATE_DIR=/var/lib/tailscale"
+       - TS_SOCKET=/var/run/tailscale/tailscaled.sock
+       - TS_EXTRA_ARGS=--accept-dns
+     restart: always
+

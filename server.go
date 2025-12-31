@@ -74,7 +74,7 @@ func main() {
 			w.WriteHeader(500)
 			return
 		}
-		slog.Info("req", "type", cmdreq.Msg[:64])
+		slog.Info("req", "msg", cmdreq)
 		return
 	}
 	sessionHandler := func(w http.ResponseWriter, req *http.Request) {
