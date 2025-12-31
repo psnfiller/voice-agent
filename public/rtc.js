@@ -1,23 +1,13 @@
 async function main() {
-
-  const REMOTE_LOG = false;
-
   function log(msg, extra) {
     try {
       if (extra !== undefined) console.log('[voice-agent]', msg, extra); else console.log('[voice-agent]', msg);
     } catch(e){}
-    if (!REMOTE_LOG) return;
     if (extra === undefined) extra = '';
     const payload = { Msg: String(msg), Req: JSON.stringify(extra) };
     fetch('/log', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).catch(()=>{});
   };
-      const r = fetch('/log', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
 
-	};
   // Store a reference to the <h1> in a variable
   const myHeading = document.querySelector("h1");
   if (myHeading) myHeading.textContent = "Hello world!";
@@ -185,7 +175,6 @@ async function main() {
   }
 
   };
-
   // Start the session using the Session Description Protocol (SDP)
   console.log("Creating offer...");
   await pc.setLocalDescription(await pc.createOffer());
@@ -225,7 +214,7 @@ async function main() {
     throw e;
   });
   console.log("Remote description set.");
-}
+};
 
 main().catch(err => {
   console.error("Fatal error in rtc.js:", err);
