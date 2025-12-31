@@ -53,8 +53,20 @@ async function main() {
   let ttsActive = false;
   const ttsStart = () => { if (!ttsActive) { ttsActive = true; try { localTrack.enabled = false; log("Mic muted (TTS start)"); } catch(_){} } };
   const ttsStop  = () => { if (ttsActive)  { ttsActive = false; try { localTrack.enabled = true;  log("Mic unmuted (TTS stop)"); } catch(_){} } };
+  // User toggle state and unified mic state applier
+  let userMuted = false;
+  function applyMicState(){
+    const effective = (userMuted==false) && (ttsActive==false);
+    try { localTrack.enabled = effective; } catch(_){}
+    const btn = document.getElementById("mic-toggle");
+    if (btn) btn.textContent = "Mic: " + (effective ? "ON" : (userMuted ? "OFF (user)" : "OFF"));
+  }
+
   log("Microphone granted. Tracks:", ms.getTracks().map(t => t.kind+":"+t.readyState));
   pc.addTrack(ms.getTracks()[0]);
+  // Initialize mic toggle UI
+  try { const btn = document.getElementById("mic-toggle"); if (btn && !btn._bound) { btn._bound = true; btn.addEventListener("click", ()=>{ userMuted = !userMuted; log("Mic toggle: userMuted="+userMuted); applyMicState(); }); } } catch(_){}
+  applyMicState();
 
   // Set up data channel for sending and receiving events
   const dc = pc.createDataChannel("oai-events");
