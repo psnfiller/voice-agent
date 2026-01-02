@@ -31,6 +31,19 @@ app.use(express.text({ type: ["application/sdp", "text/plain"] }));
 // JSON parsing for tool calls routed through our server
 app.use(express.json());
 
+// Client log sink: forward browser logs to container stderr (docker logs)
+app.post('/log', (req, res) => {
+  try {
+    const { Msg, Req } = req.body || {};
+    console.error('[client]', Msg !== undefined ? Msg : '', Req !== undefined ? Req : '');
+  } catch (e) {
+    console.error('[client-log-error]', e?.message || e);
+  } finally {
+    res.status(204).end();
+  }
+});
+
+
 // Configure the Realtime API session, including a tool for running shell commands.
 const sessionConfigObj = {
   type: "realtime",

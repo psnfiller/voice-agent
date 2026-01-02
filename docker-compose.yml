@@ -1,24 +1,72 @@
- version: "3.8"
- services:
+services:
+  # Tailscale provides the shared network namespace for the app stack
+  tailscale:
+    image: tailscale/tailscale:stable
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+      - tailscale-run:/var/run/tailscale
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY}
+      TS_ACCEPT_DNS: "false"
+      TS_HOSTNAME: voice-agent
+    # Start tailscaled, bring the node up, and keep running
+    command:
+      - /bin/sh
+      - -c
+      - |
+        tailscaled --state=/var/lib/tailscale/tailscaled.state --socket=/var/run/tailscale/tailscaled.sock &
+        for i in $(seq 1 40); do tailscale --socket=/var/run/tailscale/tailscaled.sock status >/dev/null 2>&1 && break; sleep 0.5; done
+        tailscale --socket=/var/run/tailscale/tailscaled.sock up --authkey=${TS_AUTHKEY} --hostname=${TS_HOSTNAME:-voice-agent} --accept-dns=${TS_ACCEPT_DNS:-false} --reset || true
+        tail -f /dev/null
+
+  # Firewall container enforces egress policy within the shared namespace
+  firewall:
+    image: alpine:3.19
+    cap_add:
+      - NET_ADMIN
+    network_mode: "service:tailscale"
+    depends_on:
+      - tailscale
+    command:
+      - /bin/sh
+      - -c
+      - |
+        apk add --no-cache iptables >/dev/null 2>&1
+        # Block access to local 192.168.1.0/24 (LAN)
+        iptables -I OUTPUT 1 -d 192.168.1.0/24 -j REJECT
+        # Keep the container running so the namespace persists
+        tail -f /dev/null
+
   voice-agent:
-    network_mode: service:tailscale
     build: .
     image: voice-agent
     environment:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
-  tailscale:
-     hostname: voice-agent # This will become the tailscale device name
-     image: tailscale/tailscale:stable
-     volumes:
-         - "/dev/net/tun:/dev/net/tun"           # Required for tailscale to work
-     cap_add:                                    # Required for tailscale to work
-       - net_admin
-       - sys_module
-       - net_raw
+    # Share the Tailscale network namespace so firewall rules and Tailscale apply
+    network_mode: "service:tailscale"
+    depends_on:
+      - firewall
+    # Security hardening: prevent interference with networking and Tailscale
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp
+    ulimits:
+      nproc: 256
+      nofile: 16384
+    cpus: "1.0"
+    mem_limit: 512m
+    ipc: "none"
 
-     environment:
-       - "TS_STATE_DIR=/var/lib/tailscale"
-       - TS_SOCKET=/var/run/tailscale/tailscaled.sock
-       - TS_EXTRA_ARGS=--accept-dns
-     restart: always
-
+volumes:
+  tailscale-state:
+  tailscale-run:

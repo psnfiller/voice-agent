@@ -42,21 +42,44 @@ async function main() {
     console.log("Received remote track");
     audioElement.srcObject = e.streams[0];
     audioElement.play().catch(() => {/* ignore autoplay blocks */});
-    
+
   };
 
   // Add local audio track for microphone input in the browser
   log("Requesting microphone...");
-  const ms = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false } });
+  const ms = await navigator.mediaDevices.getUserMedia(
+		{ audio: {
+			echoCancellation: true,
+			noiseSuppression: true,
+			autoGainControl: false
+		}
+		});
   const localTrack = ms.getAudioTracks()[0];
   localTrack.enabled = true;
   let ttsActive = false;
-  const ttsStart = () => { if (!ttsActive) { ttsActive = true; try { localTrack.enabled = false; log("Mic muted (TTS start)"); } catch(_){} } };
-  const ttsStop  = () => { if (ttsActive)  { ttsActive = false; try { localTrack.enabled = true;  log("Mic unmuted (TTS stop)"); } catch(_){} } };
+  const ttsStart = () => {
+		if (!ttsActive) {
+			ttsActive = true;
+			try {
+				localTrack.enabled = false;
+				log("Mic muted (TTS start)");
+			} catch(_){}
+		}
+	};
+  const ttsStop  = () => {
+		if (ttsActive)  {
+			ttsActive = false;
+			try {
+				localTrack.enabled = true;
+				log("Mic unmuted (TTS stop)");
+			} catch(_){}
+		}
+	};
   // User toggle state and unified mic state applier
   let userMuted = false;
   function applyMicState(){
     const effective = (userMuted==false) && (ttsActive==false);
+		log("mic set to", effective);
     try { localTrack.enabled = effective; } catch(_){}
     const btn = document.getElementById("mic-toggle");
     if (btn) btn.textContent = "Mic: " + (effective ? "ON" : (userMuted ? "OFF (user)" : "OFF"));
@@ -65,7 +88,17 @@ async function main() {
   log("Microphone granted. Tracks:", ms.getTracks().map(t => t.kind+":"+t.readyState));
   pc.addTrack(ms.getTracks()[0]);
   // Initialize mic toggle UI
-  try { const btn = document.getElementById("mic-toggle"); if (btn && !btn._bound) { btn._bound = true; btn.addEventListener("click", ()=>{ userMuted = !userMuted; log("Mic toggle: userMuted="+userMuted); applyMicState(); }); } } catch(_){}
+  try {
+		const btn = document.getElementById("mic-toggle");
+		if (btn && !btn._bound) {
+			btn._bound = true;
+			btn.addEventListener("click", ()=>{
+				userMuted = !userMuted;
+				log("Mic toggle: userMuted="+userMuted);
+				applyMicState();
+			});
+		}
+	} catch(_){}
   applyMicState();
 
   // Set up data channel for sending and receiving events
@@ -99,38 +132,57 @@ async function main() {
 
 		log("starting tool call", cmd)
     try {
-      const payload = { Command: ["/bin/bash", "-lc", cmd] };
-      const r = await fetch('/tools', {
+      const payload = { command: cmd };
+      const r = await fetch('/tools/shell', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
       if (!r.ok) throw new Error(`/tools HTTP ${r.status}`);
       const data = await r.json();
-      const stdout = base64ToText(data.Stdout);
-      const stderr = base64ToText(data.Stderr);
+      const stdout = data.stdout || "";
+      const stderr = data.stderr || "";
       const combined = [stdout, stderr].filter(Boolean).join(stderr && stdout ? "\n" : "");
       if (combined) {
-        if (logEl) { logEl.textContent += combined + "\n"; logEl.scrollTop = logEl.scrollHeight; }
+        if (logEl) {
+					logEl.textContent += combined + "\n";
+					logEl.scrollTop = logEl.scrollHeight;
+				}
       } else {
-        if (logEl) { logEl.textContent += "(no output)\n"; logEl.scrollTop = logEl.scrollHeight; }
+        if (logEl) {
+					logEl.textContent += "(no output)\n";
+					logEl.scrollTop = logEl.scrollHeight;
+				}
       }
       // Send function output back to the model in the newer Realtime schema
       const textOut = (combined || '(no output)').trim();
-      const appendEvent = { type: 'input_text.append', text: `Tool run_shell output (call ${callId}):\n${textOut}` };
-      log('Sending input_text.append with tool output', appendEvent);
+      const appendEvent = {
+				type: 'input_text.delta',
+				text: `Tool run_shell output (call ${callId}):\n${textOut}`
+			};
+      log('Sending input_text.delta with tool output', appendEvent);
       dc.send(JSON.stringify(appendEvent));
+      const commitEvent = { type: 'input_text.commit' };
+      dc.send(JSON.stringify(commitEvent));
       const continueEvent = { type: 'response.create' };
       log('Sending response.create to continue', continueEvent);
       dc.send(JSON.stringify(continueEvent));
     } catch (err) {
       const text = `ERROR: ${(err && err.message) || String(err)}`;
-      if (logEl) { logEl.textContent += `\n${text}\n`; logEl.scrollTop = logEl.scrollHeight; }
-      const appendEvent = { type: 'input_text.append', text: `Tool run_shell error (call ${callId}):\n${text}` };
-      console.log('Sending input_text.append with tool error');
+      if (logEl) {
+				logEl.textContent += `\n${text}\n`;
+				logEl.scrollTop = logEl.scrollHeight;
+			}
+      const appendEvent = {
+				type: 'input_text.delta',
+				text: `Tool run_shell error (call ${callId}):\n${text}`
+			};
+      log('Sending input_text.delta with tool error', appendEvent);
       dc.send(JSON.stringify(appendEvent));
+      const commitEvent = { type: 'input_text.commit' };
+      dc.send(JSON.stringify(commitEvent));
       const continueEvent = { type: 'response.create' };
-      console.log('Sending response.create to continue after error');
+      log('Sending response.create to continue after error');
       dc.send(JSON.stringify(continueEvent));
     }
 		log("tool call finished");
@@ -147,19 +199,17 @@ async function main() {
 
 
   try {
-    // Some events may be binary (audio). Only handle JSON strings here.
     if (typeof event.data !== "string") return;
     const msg = JSON.parse(event.data);
     log('DC message type:', msg?.type);
-    // reduced verbose logging
 
-    // Handle function call args streaming (new schema)
     if (msg && msg.type === "response.function_call_arguments.delta") {
       const id = msg.call_id;
       const d = msg.delta || "";
       pendingArgs.set(id, (pendingArgs.get(id) || "") + d);
       return;
     }
+
     if (msg && msg.type === "response.function_call_arguments.done") {
       const id = msg.call_id;
       const responseId = msg.response_id;
@@ -167,7 +217,13 @@ async function main() {
       let argsStr = msg.arguments || pendingArgs.get(id) || "";
       pendingArgs.delete(id);
       let args = {};
-      try { args = argsStr ? JSON.parse(argsStr) : {}; } catch(e) { console.warn("bad function args JSON", e, argsStr); args = {}; }
+
+      try {
+				args = argsStr ? JSON.parse(argsStr) : {};
+			} catch(e) {
+				log("bad function args JSON", e, argsStr);
+				args = {};
+			}
       if (name === "run_shell") {
         await runShell(args, id, responseId);
       }
@@ -178,12 +234,12 @@ async function main() {
 
     // Simple DC-event-based half-duplex gating
     try {
-      if (msg.type === "response.output_audio.delta") ttsStart();
+      if (msg.type === "response.output_audio.delta") {
+				ttsStart();
+			}
       if (msg.type === "response.output_audio.done" || msg.type === "output_audio_buffer.cleared" || msg.type === "response.done") ttsStop();
     } catch(_){}
 
-    // Handle tool calls from the model
-  // Legacy tool_call handler removed to use new Realtime schema only.
 
   } catch (e) {
     console.warn("Failed to handle data channel message:", e);

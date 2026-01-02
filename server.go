@@ -183,10 +183,11 @@ func main() {
 	}
 
 	http.HandleFunc("/session", sessionHandler)
-	http.HandleFunc("/tools", toolsHandler)
+	http.HandleFunc("/tools/shell", toolsHandler)
 	http.HandleFunc("/log", logHandler)
 	http.Handle("/", http.FileServer(http.Dir("public")))
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	slog.Info("server starting", "addr", ":8080")
+	log.Fatal(http.ListenAndServe(":3000", nil))
 
 }
 
