@@ -35,8 +35,9 @@ var session = []byte(`
         "type": "object",
         "properties": {
           "command": {
-            "type": "string",
-            "description": "The exact shell command to execute. Avoid interactive commands."
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "The command and its arguments as an array of strings, e.g., [\"ls\", \"-la\"]. Avoid interactive commands."
           }
         },
         "required": ["command"],
@@ -164,6 +165,7 @@ func main() {
 			http.Error(w, "missing command", http.StatusBadRequest)
 			return
 		}
+		slog.Info("tools request", "cmd", cmdreq)
 		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 		cmd := exec.CommandContext(ctx, cmdreq.Command[0], cmdreq.Command[1:]...)
@@ -180,6 +182,7 @@ func main() {
 		if err := json.NewEncoder(w).Encode(&out); err != nil {
 			slog.Error("failed to write response", "err", err)
 		}
+		slog.Info("tools respone", "out", out)
 	}
 
 	http.HandleFunc("/session", sessionHandler)

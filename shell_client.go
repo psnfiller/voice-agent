@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 )
@@ -40,6 +41,7 @@ func main() {
 		os.Exit(1)
 	}
 
+	slog.Info("issing call", "body", body, "url", *url)
 	httpResp, err := http.Post(*url, "application/json", bytes.NewReader(body))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "post: %v\n", err)
@@ -52,6 +54,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "server returned %s: %s\n", httpResp.Status, string(b))
 		os.Exit(1)
 	}
+	slog.Info("got 200")
 
 	respBody, err := io.ReadAll(httpResp.Body)
 	if err != nil {
@@ -64,6 +67,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "unmarshal response: %v\nraw: %s\n", err, string(respBody))
 		os.Exit(1)
 	}
+	slog.Info("read result", "res", res)
 
 	if *quiet {
 		if len(res.Stdout) > 0 {
@@ -80,9 +84,9 @@ func main() {
 			fmt.Fprint(os.Stderr, string(res.Stderr))
 		}
 	}
+	slog.Info("written")
 
 	if !res.OK {
 		os.Exit(1)
 	}
 }
-
