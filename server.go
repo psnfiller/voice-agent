@@ -21,6 +21,7 @@ var session = []byte(`
 {
   "model": "gpt-4o-realtime-preview-2024-12-17",
   "voice": "marin",
+  "modalities": ["text", "audio"],
   "instructions": "You are a helpful voice assistant. Only reply in english.  Keep replies concise. When the user asks to run, check, or retrieve anything from this machine, ALWAYS use the run_shell tool with an appropriate command. Do not simulate shell output; actually call the tool and return its result. Confirm potentially destructive actions before executing. Summarize results and ask clarifying questions when needed.",
   "turn_detection": {"type": "server_vad", "silence_duration_ms": 800},
   "input_audio_transcription": {"model": "gpt-4o-mini-transcribe"},
@@ -148,14 +149,13 @@ func main() {
 		oaiReq.Header.Set("OpenAI-Beta", "realtime=v1")
 		resp, err := http.DefaultClient.Do(oaiReq)
 		if err != nil {
-			b, _ := io.ReadAll(req.Body)
-			l.Error("failed", "err", err, "body", string(b))
+			l.Error("failed to call /v1/realtime/calls", "err", err)
 			w.WriteHeader(500)
 			return
 		}
 		if resp.StatusCode >= 300 {
-			b, _ := io.ReadAll(req.Body)
-			slog.Error(">300 error", "code", resp.StatusCode, "resp", resp, "body", string(b))
+			rb, _ := io.ReadAll(resp.Body)
+			slog.Error("/realtime/calls failed", "status", resp.Status, "body", string(rb))
 			w.WriteHeader(500)
 			return
 		}
