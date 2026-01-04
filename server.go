@@ -174,23 +174,35 @@ func main() {
 		cmd.Stdout = &stdoutBuf
 		cmd.Stderr = &stderrBuf
 		runErr := cmd.Run()
+		exitCode := 0
+		errStr := ""
+		if runErr != nil {
+			if exitErr, ok := runErr.(*exec.ExitError); ok {
+				exitCode = exitErr.ExitCode()
+			} else {
+				exitCode = -1
+			}
+			errStr = runErr.Error()
+		}
 		out := CmdResult{
-			Stdout: stdoutBuf.Bytes(),
-			Stderr: stderrBuf.Bytes(),
-			OK:     runErr == nil,
+			Stdout:   stdoutBuf.Bytes(),
+			Stderr:   stderrBuf.Bytes(),
+			OK:       runErr == nil,
+			ExitCode: exitCode,
+			Error:    errStr,
 		}
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(&out); err != nil {
 			slog.Error("failed to write response", "err", err)
 		}
-		slog.Info("tools respone", "out", out)
+		slog.Info("tools response", "ok", out.OK, "code", out.ExitCode, "stdout", string(out.Stdout), "stderr", string(out.Stderr), "err", out.Error)
 	}
 
 	http.HandleFunc("/session", sessionHandler)
 	http.HandleFunc("/tools/shell", toolsHandler)
 	http.HandleFunc("/log", logHandler)
 	http.Handle("/", http.FileServer(http.Dir("public")))
-	slog.Info("server starting", "addr", ":8080")
+	slog.Info("server starting", "addr", ":3000")
 	log.Fatal(http.ListenAndServe(":3000", nil))
 
 }
@@ -206,4 +218,6 @@ type CmdResult struct {
 	Stdout []byte
 	Stderr []byte
 	OK     bool
+	ExitCode int
+	Error    string
 }

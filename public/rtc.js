@@ -12,7 +12,7 @@ async function main() {
 			},
 			body: JSON.stringify(payload)
 		}).catch((a) => {
-       console.error(error);
+       console.error(a);
 		});
 	};
 
@@ -40,6 +40,10 @@ async function main() {
   window._pc = pc;
   log('created rtc peer', '');
 
+  // Resolve when a server-reflexive candidate appears (often indicates we have usable network path)
+  let resolveSrflx;
+  const srflxReady = new Promise((resolve) => { resolveSrflx = resolve; });
+
   pc.onconnectionstatechange = () => log('PC connectionState:', pc.connectionState);
   pc.oniceconnectionstatechange = () => log('PC iceConnectionState:', pc.iceConnectionState);
   pc.onicegatheringstatechange = () => log('PC iceGatheringState:', pc.iceGatheringState);
@@ -47,7 +51,12 @@ async function main() {
     pc.addEventListener('icecandidateerror', (ev) => {
       console.warn('ICE candidate error:', ev.errorText || ev.errorCode, ev.url || '');
     });
-    if (e.candidate) log('ICE candidate:', e.candidate.type, e.candidate.protocol);
+    if (e.candidate) {
+      log('ICE candidate:', e.candidate.type, e.candidate.protocol);
+      try {
+        if (e.candidate.type === 'srflx' && resolveSrflx) { resolveSrflx(); resolveSrflx = null; }
+      } catch (_) {}
+    }
     else log('ICE candidate gathering complete');
   };
 
@@ -131,6 +140,36 @@ async function main() {
     } catch (_) {}
   }
 
+
+  function normalizeUptime(text) {
+    try {
+      const t = String(text || '').trim();
+      if (!t) return t;
+      if (t.startsWith('up ')) return t; // already pretty
+      const idx = t.indexOf(' up ');
+      if (idx === -1) return t;
+      let after = t.slice(idx + 4);
+      // cut at ' user', ' users', or 'load average'
+      const stops = [' user', ' users', 'load average'];
+      let stop = after.length;
+      for (const key of stops) {
+        const i = after.indexOf(key);
+        if (i !== -1 && i < stop) stop = i;
+      }
+      after = after.slice(0, stop).trim().replace(/^,\s*/, '').replace(/\s+,/g, ',');
+      // Convert HH:MM into 'H hours, M minutes'
+      const m = after.match(/(\d+):(\d{2})/);
+      if (m) {
+        const h = parseInt(m[1], 10);
+        const mm = parseInt(m[2], 10);
+        const parts = [];
+        if (!isNaN(h)) parts.push(h + ' hour' + (h === 1 ? '' : 's'));
+        if (!isNaN(mm) && mm > 0) parts.push(mm + ' minute' + (mm === 1 ? '' : 's'));
+        after = after.replace(m[0], parts.join(', '));
+      }
+      return ('up ' + after).trim();
+    } catch (_) { return String(text || ''); }
+  }
   // Accumulate function call args
   const pendingArgs = new Map();
 
@@ -181,12 +220,20 @@ async function main() {
         if (logEl) { logEl.textContent += '(no output)\n'; logEl.scrollTop = logEl.scrollHeight; }
       }
 
-      const textOut = (combined || '(no output)').trim();
-      const appendEvent = { type: 'input_text.delta', text: `Tool run_shell output (call ${callId}):\n${textOut}` };
-      log('Sending input_text.delta with tool output', appendEvent);
-      dc.send(JSON.stringify(appendEvent));
-      const commitEvent = { type: 'input_text.commit' };
-      dc.send(JSON.stringify(commitEvent));
+      const code = (data.exitCode !== undefined ? data.exitCode : data.ExitCode);
+      const ok = (data.ok !== undefined ? data.ok : data.OK);
+      const errStr = (data.error !== undefined ? data.error : data.Error) || "";
+      const textOut = (combined || "(no output)").trim();
+      const summary = ok ? "SUCCESS" : `FAIL (exit ${code})`;
+      const details = errStr ? `
+Error: ${errStr}` : "";
+      const cmdArr = Array.isArray(args?.command) ? args.command : [];
+      const isUptime = cmdArr[0] === 'uptime';
+      const outputForModel = isUptime ? normalizeUptime(textOut) : textOut;
+      const outEvent = { type: 'response.function_call_output', call_id: callId, output: outputForModel } ;
+      log('Sending function_call_output', outEvent);
+      dc.send(JSON.stringify(outEvent));
+      await new Promise((r) => setTimeout(r, 80));
       const continueEvent = { type: 'response.create' };
       log('Sending response.create to continue', continueEvent);
       dc.send(JSON.stringify(continueEvent));
@@ -239,6 +286,14 @@ async function main() {
         let args = {};
         try { args = argsStr ? JSON.parse(argsStr) : {}; }
         catch (e) { log('bad function args JSON', e, argsStr); args = {}; }
+        // Cancel any in-progress response to avoid speaking before tool results
+        try {
+          if (responseId) {
+            const cancel = { type: 'response.cancel', response_id: responseId };
+            log('Sending response.cancel for pending response', cancel);
+            dc.send(JSON.stringify(cancel));
+          }
+        } catch (_) {}
         if (name === 'run_shell') await runShell(args, id, responseId);
         return;
       }
@@ -262,7 +317,8 @@ async function main() {
   // SDP Offer/Answer
   console.log('Creating offer...');
   await pc.setLocalDescription(await pc.createOffer());
-  await new Promise((resolve) => {
+  // Proceed when ICE completes, or we have at least one srflx candidate, or after a short timeout.
+  const iceComplete = new Promise((resolve) => {
     if (pc.iceGatheringState === 'complete') return resolve();
     const check = () => {
       if (pc.iceGatheringState === 'complete') {
@@ -272,6 +328,11 @@ async function main() {
     };
     pc.addEventListener('icegatheringstatechange', check);
   });
+  await Promise.race([
+    iceComplete,
+    srflxReady,
+    new Promise((resolve) => setTimeout(resolve, 5000))
+  ]);
 
   const local = pc.localDescription;
   console.log('Sending /session with SDP size:', local?.sdp?.length || 0);

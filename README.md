@@ -2,13 +2,36 @@
 
 A trivial voice agent server. Runs shell commands in a docker container.
 
+This uses [OpenAI's realtime conversations
+API](https://platform.openai.com/docs/guides/realtime-conversations).
+
 To run
 
 ```
 OPENAI_API_KEY=$(op item get openai-key --reveal --fields credential) docker compose up --build
 ```
 
+## the container
+
+Commands are run in a container.  You can use `shell_client.go` to run commands
+yourself.
+
+Precautions:
+
+* Non root
+* no capabilities
+* read only filesystem
+* no local network or tailscale access (internet access is generally needed)
+
+TODO(psn):
+
+* limit cpu and memory
+* limit access to openai key in env
+
+
 ## TODO(psn):
 
-* transscript
-* ready incicator
+* transscript  - include human
+* documentation on the page
+* documenrt lockdown
+
