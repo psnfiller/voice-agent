@@ -388,7 +388,15 @@ Error: ${errStr}` : "";
       if (msg.type === 'response.output_text.delta' && (msg?.delta || msg?.text)) { const d = (typeof msg.delta === 'string') ? msg.delta : (Array.isArray(msg.delta) ? msg.delta.map(x => x && (x.text || x.content || '')).join('') : (msg.text||'')); log('agent text delta', { len: String(d||'').length }); upsertAgentTranscript(d, false); }
       if (msg.type === 'response.output_text.done' && (msg?.text || msg?.output_text)) { const t = msg.text || msg.output_text || ''; log('agent text done', { len: String(t||'').length }); upsertAgentTranscript(t, true); }
 
-      // Half-duplex gating based on audio events
+      
+      // Generic fallback: capture any response.* delta/transcript/text
+      if (msg && typeof msg.type === 'string' && msg.type.startsWith('response.')) {
+        if (typeof msg.delta === 'string' && msg.delta) { log('agent generic delta', { type: msg.type, len: msg.delta.length }); upsertAgentTranscript(msg.delta, false); }
+        if (typeof msg.transcript === 'string' && msg.transcript) { log('agent generic transcript', { type: msg.type, len: msg.transcript.length }); upsertAgentTranscript(msg.transcript, false); }
+        if (typeof msg.text === 'string' && msg.text) { log('agent generic text', { type: msg.type, len: msg.text.length }); upsertAgentTranscript(msg.text, true); }
+      }
+
+// Half-duplex gating based on audio events
       if (msg.type === 'output_audio_buffer.started') { log('audio.buffer.started'); }
       if (msg.type === 'output_audio_buffer.cleared') { log('audio.buffer.cleared'); }
       if (msg.type === 'response.output_audio.done') { log('audio.output.done'); }
