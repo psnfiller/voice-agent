@@ -156,6 +156,35 @@ async function main() {
       }
     } catch (_) {}
   }
+
+  let agentRow = null;
+  let agentBuf = '';
+  function upsertAgentTranscript(text, done) {
+    try {
+      if (!transcriptEl) return;
+      if (!agentRow) {
+        const row = document.createElement('div');
+        row.style.margin = '0.25rem 0';
+        const who = document.createElement('span');
+        who.style.color = '#c9f';
+        who.style.fontWeight = '600';
+        who.textContent = 'Agent: ';
+        const span = document.createElement('span');
+        span.className = 'agent-text';
+        row.appendChild(who);
+        row.appendChild(span);
+        transcriptEl.appendChild(row);
+        agentRow = row;
+        agentBuf = '';
+      }
+      const span = agentRow.querySelector('.agent-text');
+      if (typeof text === 'string') agentBuf += text;
+      if (span) span.textContent = String(agentBuf);
+      transcriptEl.scrollTop = transcriptEl.scrollHeight;
+      if (done) { agentRow = null; agentBuf = ''; }
+    } catch (_) {}
+  }
+
   function appendTranscript(role, text) {
     try {
       if (!transcriptEl) return;
@@ -353,13 +382,16 @@ Error: ${errStr}` : "";
       if (!msg || typeof msg !== 'object') return;
 
       // Capture agent TTS transcript events (audio transcript)
-      if (msg.type === 'response.output_audio_transcript.delta' && msg?.delta) { log('agent transcript delta', { len: String(msg.delta||'').length }); appendTranscript('agent', msg.delta); }
-      if (msg.type === 'response.output_audio_transcript.done' && msg?.transcript) { log('agent transcript done', { len: String(msg.transcript||'').length }); appendTranscript('agent', msg.transcript); }
+      if (msg.type === 'response.output_audio_transcript.delta' && msg?.delta) { const d = (typeof msg.delta === 'string') ? msg.delta : (Array.isArray(msg.delta) ? msg.delta.map(x => x && (x.text || x.content || '')).join('') : ''); log('agent transcript delta', { len: String(d||'').length }); upsertAgentTranscript(d, false); }
+      if (msg.type === 'response.output_audio_transcript.done' && msg?.transcript) { const t = msg.transcript; log('agent transcript done', { len: String(t||'').length }); upsertAgentTranscript(t, true); }
+
+      if (msg.type === 'response.output_text.delta' && (msg?.delta || msg?.text)) { const d = (typeof msg.delta === 'string') ? msg.delta : (Array.isArray(msg.delta) ? msg.delta.map(x => x && (x.text || x.content || '')).join('') : (msg.text||'')); log('agent text delta', { len: String(d||'').length }); upsertAgentTranscript(d, false); }
+      if (msg.type === 'response.output_text.done' && (msg?.text || msg?.output_text)) { const t = msg.text || msg.output_text || ''; log('agent text done', { len: String(t||'').length }); upsertAgentTranscript(t, true); }
 
       // Half-duplex gating based on audio events
       try {
-        if (msg.type === 'output_audio_buffer.started' || msg.type === 'response.output_audio_transcript.delta') ttsStart();
-        if (msg.type === 'response.output_audio.done' || msg.type === 'output_audio_buffer.cleared' || msg.type === 'response.output_audio_transcript.done' || msg.type === 'response.done') ttsStop();
+        if (msg.type === 'output_audio_buffer.started' || msg.type === 'response.output_audio_transcript.delta' || msg.type === 'response.output_text.delta') ttsStart();
+        if (msg.type === 'response.output_audio.done' || msg.type === 'output_audio_buffer.cleared' || msg.type === 'response.output_audio_transcript.done' || msg.type === 'response.output_text.done' || msg.type === 'response.done') ttsStop();
       } catch (_) {}
     } catch (e) {
       console.warn('Failed to handle data channel message:', e);
