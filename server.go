@@ -20,7 +20,7 @@ import (
 var session = []byte(`
 {
   "model": "gpt-4o-realtime-preview-2024-12-17",
-  "voice": "verse",
+  "voice": "marin",
   "modalities": ["text", "audio"],
   "instructions": "You are a helpful voice assistant. Only reply in english.  Keep replies concise. When the user asks to run, check, or retrieve anything from this machine, ALWAYS use the run_shell tool with an appropriate command. Do not simulate shell output; actually call the tool and return its result. Confirm potentially destructive actions before executing. Summarize results and ask clarifying questions when needed.",
   "turn_detection": {"type": "server_vad", "silence_duration_ms": 800},
@@ -149,8 +149,12 @@ func main() {
 		oaiReq.Header["Authorization"] = []string{"Bearer " + openAIKey}
 		oaiReq.Header.Set("Content-Type", writer.FormDataContentType())
 		oaiReq.Header.Set("OpenAI-Beta", "realtime=v1")
-		if openAIProject != "" { oaiReq.Header.Set("OpenAI-Project", openAIProject) }
-		if openAIOrg != "" { oaiReq.Header.Set("OpenAI-Organization", openAIOrg) }
+		if openAIProject != "" {
+			oaiReq.Header.Set("OpenAI-Project", openAIProject)
+		}
+		if openAIOrg != "" {
+			oaiReq.Header.Set("OpenAI-Organization", openAIOrg)
+		}
 
 		resp, err := http.DefaultClient.Do(oaiReq)
 		if err != nil {
