@@ -5,8 +5,16 @@ async function main() {
     } catch (e) {}
     if (extra === undefined) extra = '';
     const payload = { Msg: String(msg), Req: JSON.stringify(extra) };
-    fetch('/log', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).catch(() => {});
-  }
+    fetch('/log', {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json'
+			},
+			body: JSON.stringify(payload)
+		}).catch((a) => {
+       console.error(error);
+		});
+	};
 
   // Update heading
   const myHeading = document.querySelector('h1');

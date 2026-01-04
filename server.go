@@ -78,6 +78,7 @@ func main() {
 		slog.Info("req", "msg", cmdreq)
 		return
 	}
+
 	sessionHandler := func(w http.ResponseWriter, req *http.Request) {
 		if req.Method != "POST" {
 			io.WriteString(w, "Hello from a HandleFunc #2!\n")
