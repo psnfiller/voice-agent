@@ -8,8 +8,19 @@
       <span>Command log:</span>
       <button id="mic-toggle">Mic: ON</button>
     </div>
+    
+    <div id="status" style="display:flex; align-items:center; gap:.5rem; margin: .5rem 0 1rem 0; font-family: system-ui, sans-serif;">
+      <span id="ready-dot" style="display:inline-block; width:10px; height:10px; border-radius:50%; background:#a00;"></span>
+      <span id="ready-text" style="color:#ddd;">Initializing...</span>
+    </div>
     <pre id="log" style="white-space:pre-wrap; background:#111; color:#eee; padding:1rem; min-height:200px; border-radius:8px;"></pre>
-    </body>
+    
+
+    <h2>Transcript</h2>
+    <div id="transcript" style="background:#181818; color:#eee; padding:1rem; border-radius:8px; min-height:150px; font-family: system-ui, sans-serif;">
+      <div style="color:#888;">(Transcript will appear here)</div>
+    </div>
+  </body>
     </html>
 
 
