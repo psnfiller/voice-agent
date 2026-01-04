@@ -73,6 +73,8 @@ func clientIP(r *http.Request) string {
 func main() {
 	fmt.Println("vim-go")
 	openAIKey := os.Getenv("OPENAI_API_KEY")
+	openAIProject := os.Getenv("OPENAI_PROJECT")
+	openAIOrg := os.Getenv("OPENAI_ORG")
 	if openAIKey == "" {
 		log.Fatal("no key")
 	}
@@ -147,6 +149,9 @@ func main() {
 		oaiReq.Header["Authorization"] = []string{"Bearer " + openAIKey}
 		oaiReq.Header.Set("Content-Type", writer.FormDataContentType())
 		oaiReq.Header.Set("OpenAI-Beta", "realtime=v1")
+		if openAIProject != "" { oaiReq.Header.Set("OpenAI-Project", openAIProject) }
+		if openAIOrg != "" { oaiReq.Header.Set("OpenAI-Organization", openAIOrg) }
+
 		resp, err := http.DefaultClient.Do(oaiReq)
 		if err != nil {
 			l.Error("failed to call /v1/realtime/calls", "err", err)
