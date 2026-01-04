@@ -40,14 +40,14 @@ async function main() {
   window._pc = pc;
   log('created rtc peer', '');
 
-  pc.onconnectionstatechange = () => console.log('PC connectionState:', pc.connectionState);
-  pc.oniceconnectionstatechange = () => console.log('PC iceConnectionState:', pc.iceConnectionState);
-  pc.onicegatheringstatechange = () => console.log('PC iceGatheringState:', pc.iceGatheringState);
+  pc.onconnectionstatechange = () => log('PC connectionState:', pc.connectionState);
+  pc.oniceconnectionstatechange = () => log('PC iceConnectionState:', pc.iceConnectionState);
+  pc.onicegatheringstatechange = () => log('PC iceGatheringState:', pc.iceGatheringState);
   pc.onicecandidate = (e) => {
     pc.addEventListener('icecandidateerror', (ev) => {
       console.warn('ICE candidate error:', ev.errorText || ev.errorCode, ev.url || '');
     });
-    if (e.candidate) console.log('ICE candidate:', e.candidate.type, e.candidate.protocol);
+    if (e.candidate) log('ICE candidate:', e.candidate.type, e.candidate.protocol);
     else log('ICE candidate gathering complete');
   };
 
