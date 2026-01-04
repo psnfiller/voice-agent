@@ -348,6 +348,10 @@ Error: ${errStr}` : "";
         log('user transcription event', { type: t, itemId, isDelta, isCompleted, hasDelta: !!msg.delta, hasTranscript: !!msg.transcript, textLen: String(text||'').length });
         if (text) upsertUserTranscript(itemId, text, isCompleted);
         else log('no text in transcription event', { type: t, itemId });
+        // If a user utterance just completed and there's no pending tool call, ask the model to respond.
+        if (isCompleted) {
+          try { const ev = { type: 'response.create' }; log('sending response.create after user transcription completed', ev); dc.send(JSON.stringify(ev)); } catch (e) { log('failed to send response.create', String(e && e.message || e)); }
+        }
         return;
       }
 
