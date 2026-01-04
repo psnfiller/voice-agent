@@ -324,7 +324,7 @@ Error: ${errStr}` : "";
     try {
       if (typeof event.data !== 'string') return;
       const msg = JSON.parse(event.data);
-      console.log('DC message type:', msg?.type);
+      console.log('DC message type:', msg?.type); log('dc.type', msg && msg.type || '');
 
       // Capture user speech recognized by the model (robust across event variants)
       if (msg && typeof msg.type === 'string' && (
@@ -389,6 +389,11 @@ Error: ${errStr}` : "";
       if (msg.type === 'response.output_text.done' && (msg?.text || msg?.output_text)) { const t = msg.text || msg.output_text || ''; log('agent text done', { len: String(t||'').length }); upsertAgentTranscript(t, true); }
 
       // Half-duplex gating based on audio events
+      if (msg.type === 'output_audio_buffer.started') { log('audio.buffer.started'); }
+      if (msg.type === 'output_audio_buffer.cleared') { log('audio.buffer.cleared'); }
+      if (msg.type === 'response.output_audio.done') { log('audio.output.done'); }
+      if (msg.type === 'response.done') { log('response.done'); }
+      
       try {
         if (msg.type === 'output_audio_buffer.started' || msg.type === 'response.output_audio_transcript.delta' || msg.type === 'response.output_text.delta') ttsStart();
         if (msg.type === 'response.output_audio.done' || msg.type === 'output_audio_buffer.cleared' || msg.type === 'response.output_audio_transcript.done' || msg.type === 'response.output_text.done' || msg.type === 'response.done') ttsStop();
