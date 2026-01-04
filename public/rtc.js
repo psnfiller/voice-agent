@@ -69,6 +69,8 @@ async function main() {
     audioElement.srcObject = e.streams[0];
     audioElement.play().catch(() => {});
   };
+  pc.onnegotiationneeded = () => log('PC negotiation needed');
+  pc.onsignalingstatechange = () => log('PC signalingState', pc.signalingState);
 
   // Microphone
   log('Requesting microphone...');
@@ -121,6 +123,8 @@ async function main() {
   // Data channel
   const dc = pc.createDataChannel('oai-events');
   dc.onopen = () => { log('Data channel open'); setReady(true, 'Ready. Start speaking.'); };
+  dc.onerror = (e) => { log('Data channel error', String(e && (e.message || e.name || e.type) || e)); };
+  dc.onclose = () => { log('Data channel closed'); setReady(false, 'Connection closed'); };
   const transcriptEl = document.getElementById('transcript');
   log('transcriptEl present', !!transcriptEl);
   // Track in-progress user transcription rows by item id (top-level scope)
@@ -294,12 +298,24 @@ Error: ${errStr}` : "";
       console.log('DC message type:', msg?.type);
 
       // Capture user speech recognized by the model (robust across event variants)
-      if (msg && typeof msg.type === 'string' && (msg.type.includes('input_audio_transcription') || msg.type.includes('input_text'))) {
+      if (msg && typeof msg.type === 'string' && (
+           msg.type.includes('input_audio_transcription') ||
+           msg.type.includes('input_text') ||
+           msg.type == 'response.input_audio_transcription.delta' ||
+           msg.type == 'response.input_audio_transcription.completed'
+        )) {
         const t = msg.type;
         const isDelta = t.endsWith('delta');
         const isCompleted = t.endsWith('completed') || t.endsWith('done');
         const itemId = msg.item_id || (msg.item && msg.item.id) || msg.id || 'no-id';
-        const text = (isDelta ? (msg.delta || msg.text || '') : (msg.transcript || msg.text || '')) || '';
+        let text = '';
+        if (isDelta) {
+          if (typeof msg.delta === 'string') text = msg.delta;
+          else if (Array.isArray(msg.delta)) text = msg.delta.map(x => (x && (x.text || x.content || ''))).join('');
+          else text = msg.text || '';
+        } else {
+          text = msg.transcript || msg.text || '';
+        }
         log('user transcription event', { type: t, itemId, isDelta, isCompleted, hasDelta: !!msg.delta, hasTranscript: !!msg.transcript, textLen: String(text||'').length });
         if (text) upsertUserTranscript(itemId, text, isCompleted);
         else log('no text in transcription event', { type: t, itemId });
@@ -351,7 +367,7 @@ Error: ${errStr}` : "";
   };
 
   // SDP Offer/Answer
-  console.log('Creating offer...');
+  console.log('Creating offer...'); log('Creating offer');
   await pc.setLocalDescription(await pc.createOffer());
   // Proceed when ICE completes, or we have at least one srflx candidate, or after a short timeout.
   const iceComplete = new Promise((resolve) => {
@@ -379,6 +395,7 @@ Error: ${errStr}` : "";
   });
   console.log('/session status:', sdpResponse.status);
   const sdpText = await sdpResponse.text();
+  log('/session response status', sdpResponse.status);
   if (!sdpResponse.ok) {
     console.error('/session error body:', sdpText.slice(0, 500));
     throw new Error('/session failed');

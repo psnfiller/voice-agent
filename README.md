@@ -11,6 +11,14 @@ To run
 OPENAI_API_KEY=$(op item get openai-key --reveal --fields credential) docker compose up --build
 ```
 
+### logs
+
+when adding logs in javascript, use the `log()` call.  to see logs
+
+```
+docker logs voice-agent-voice-agent-1
+```
+
 ## the container
 
 Commands are run in a container.  You can use `shell_client.go` to run commands
