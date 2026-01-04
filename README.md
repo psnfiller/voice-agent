@@ -11,6 +11,8 @@ To run
 OPENAI_API_KEY=$(op item get openai-key --reveal --fields credential) docker compose up --build
 ```
 
+You can then access the service via https://voice.psn.af
+
 ### logs
 
 when adding logs in javascript, use the `log()` call.  to see logs
@@ -18,6 +20,7 @@ when adding logs in javascript, use the `log()` call.  to see logs
 ```
 docker logs voice-agent-voice-agent-1
 ```
+
 
 ## the container
 

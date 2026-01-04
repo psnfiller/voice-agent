@@ -9,8 +9,8 @@ import (
 	"log"
 	"log/slog"
 	"mime/multipart"
-	"net/http"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"strings"
@@ -19,22 +19,17 @@ import (
 
 var session = []byte(`
 {
-	"type": "realtime",
-	"model": "gpt-realtime",
-  "audio": {
-	  "output": {
-			"voice": "marin"
-	  }
-	},
+  "model": "gpt-4o-realtime-preview-2024-12-17",
+  "voice": "marin",
+  "instructions": "You are a helpful voice assistant. Only reply in english.  Keep replies concise. When the user asks to run, check, or retrieve anything from this machine, ALWAYS use the run_shell tool with an appropriate command. Do not simulate shell output; actually call the tool and return its result. Confirm potentially destructive actions before executing. Summarize results and ask clarifying questions when needed.",
+  "turn_detection": {"type": "server_vad", "silence_duration_ms": 800},
   "input_audio_transcription": {"model": "gpt-4o-mini-transcribe"},
-  "turn_detection": {"type":"server_vad","silence_duration_ms":800},
-	"instructions": "You are a helpful voice assistant. Only reply in english.  Keep replies concise. When the user asks to run, check, or retrieve anything from this machine, ALWAYS use the run_shell tool with an appropriate command. Do not simulate shell output; actually call the tool and return its result. Confirm potentially destructive actions before executing. Summarize results and ask clarifying questions when needed.",
   "tool_choice": "auto",
-	"tools": [
+  "tools": [
     {
-			"type": "function",
+      "type": "function",
       "name": "run_shell",
-			"description": "Execute a shell command on the server and return stdout/stderr. Use for tasks that require shell access.",
+      "description": "Execute a shell command on the server and return stdout/stderr. Use for tasks that require shell access.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -55,23 +50,23 @@ var session = []byte(`
 // X-Forwarded-For and X-Real-IP when present, otherwise falling back to
 // the remote address.
 func clientIP(r *http.Request) string {
-    if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-        parts := strings.Split(xff, ",")
-        for _, p := range parts {
-            p = strings.TrimSpace(p)
-            if p != "" {
-                return p
-            }
-        }
-    }
-    if xr := r.Header.Get("X-Real-IP"); xr != "" {
-        return xr
-    }
-    host, _, err := net.SplitHostPort(r.RemoteAddr)
-    if err == nil && host != "" {
-        return host
-    }
-    return r.RemoteAddr
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				return p
+			}
+		}
+	}
+	if xr := r.Header.Get("X-Real-IP"); xr != "" {
+		return xr
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err == nil && host != "" {
+		return host
+	}
+	return r.RemoteAddr
 }
 
 func main() {
@@ -150,14 +145,17 @@ func main() {
 		l.Info("request", "form data", form)
 		oaiReq.Header["Authorization"] = []string{"Bearer " + openAIKey}
 		oaiReq.Header.Set("Content-Type", writer.FormDataContentType())
+		oaiReq.Header.Set("OpenAI-Beta", "realtime=v1")
 		resp, err := http.DefaultClient.Do(oaiReq)
 		if err != nil {
-			l.Error("failed", "err", err)
+			b, _ := io.ReadAll(req.Body)
+			l.Error("failed", "err", err, "body", string(b))
 			w.WriteHeader(500)
 			return
 		}
 		if resp.StatusCode >= 300 {
-			slog.Error("failed", "resp", resp)
+			b, _ := io.ReadAll(req.Body)
+			slog.Error(">300 error", "code", resp.StatusCode, "resp", resp, "body", string(b))
 			w.WriteHeader(500)
 			return
 		}
@@ -200,16 +198,16 @@ func main() {
 		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 		cmd := exec.CommandContext(ctx, cmdreq.Command[0], cmdreq.Command[1:]...)
-        // Remove OPENAI_API_KEY from the environment passed to tools
-        baseEnv := os.Environ()
-        filtered := make([]string, 0, len(baseEnv))
-        for _, kv := range baseEnv {
-            if len(kv) >= len("OPENAI_API_KEY=") && kv[:len("OPENAI_API_KEY=")] == "OPENAI_API_KEY=" {
-                continue
-            }
-            filtered = append(filtered, kv)
-        }
-        cmd.Env = filtered
+		// Remove OPENAI_API_KEY from the environment passed to tools
+		baseEnv := os.Environ()
+		filtered := make([]string, 0, len(baseEnv))
+		for _, kv := range baseEnv {
+			if len(kv) >= len("OPENAI_API_KEY=") && kv[:len("OPENAI_API_KEY=")] == "OPENAI_API_KEY=" {
+				continue
+			}
+			filtered = append(filtered, kv)
+		}
+		cmd.Env = filtered
 		var stdoutBuf, stderrBuf bytes.Buffer
 		cmd.Stdout = &stdoutBuf
 		cmd.Stderr = &stderrBuf
@@ -255,9 +253,9 @@ type CmdReq struct {
 	Command []string
 }
 type CmdResult struct {
-	Stdout []byte
-	Stderr []byte
-	OK     bool
+	Stdout   []byte
+	Stderr   []byte
+	OK       bool
 	ExitCode int
 	Error    string
 }
