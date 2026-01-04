@@ -159,6 +159,7 @@ async function main() {
 
   let agentRow = null;
   let agentBuf = '';
+  let agentRespId = null;
   function upsertAgentTranscript(text, done) {
     try {
       if (!transcriptEl) return;
@@ -386,11 +387,11 @@ Error: ${errStr}` : "";
       if (!msg || typeof msg !== 'object') return;
 
       // Capture agent TTS transcript events (audio transcript)
-      if (msg.type === 'response.output_audio_transcript.delta' && msg?.delta) { const d = (typeof msg.delta === 'string') ? msg.delta : (Array.isArray(msg.delta) ? msg.delta.map(x => x && (x.text || x.content || '')).join('') : ''); log('agent transcript delta', { len: String(d||'').length }); upsertAgentTranscript(d, false); }
-      if (msg.type === 'response.output_audio_transcript.done' && msg?.transcript) { const t = msg.transcript; log('agent transcript done', { len: String(t||'').length }); upsertAgentTranscript(t, true); }
+      if (msg.type === 'response.output_audio_transcript.delta' && msg?.delta) { const d = (typeof msg.delta === 'string') ? msg.delta : (Array.isArray(msg.delta) ? msg.delta.map(x => x && (x.text || x.content || '')).join('') : ''); if (msg.response_id && agentRespId && msg.response_id !== agentRespId) { agentRow = null; agentBuf = ''; } if (msg.response_id) agentRespId = msg.response_id; log('agent transcript delta', { len: String(d||'').length }); upsertAgentTranscript(d, false); }
+      if (msg.type === 'response.output_audio_transcript.done' && msg?.transcript) { const t = msg.transcript; agentRespId = null; log('agent transcript done', { len: String(t||'').length }); upsertAgentTranscript(t, true); }
 
-      if (msg.type === 'response.output_text.delta' && (msg?.delta || msg?.text)) { const d = (typeof msg.delta === 'string') ? msg.delta : (Array.isArray(msg.delta) ? msg.delta.map(x => x && (x.text || x.content || '')).join('') : (msg.text||'')); log('agent text delta', { len: String(d||'').length }); upsertAgentTranscript(d, false); }
-      if (msg.type === 'response.output_text.done' && (msg?.text || msg?.output_text)) { const t = msg.text || msg.output_text || ''; log('agent text done', { len: String(t||'').length }); upsertAgentTranscript(t, true); }
+      if (msg.type === 'response.output_text.delta' && (msg?.delta || msg?.text)) { const d = (typeof msg.delta === 'string') ? msg.delta : (Array.isArray(msg.delta) ? msg.delta.map(x => x && (x.text || x.content || '')).join('') : (msg.text||'')); if (msg.response_id && agentRespId && msg.response_id !== agentRespId) { agentRow = null; agentBuf = ''; } if (msg.response_id) agentRespId = msg.response_id; log('agent text delta', { len: String(d||'').length }); upsertAgentTranscript(d, false); }
+      if (msg.type === 'response.output_text.done' && (msg?.text || msg?.output_text)) { const t = msg.text || msg.output_text || ''; agentRespId = null; log('agent text done', { len: String(t||'').length }); upsertAgentTranscript(t, true); }
 
       
       // Generic fallback: capture any response.* delta/transcript/text
@@ -400,7 +401,10 @@ Error: ${errStr}` : "";
         if (typeof msg.text === 'string' && msg.text) { log('agent generic text', { type: msg.type, len: msg.text.length }); upsertAgentTranscript(msg.text, true); }
       }
 
-// Half-duplex gating based on audio events
+// Finalize agent row on response.done as a safety
+      if (msg.type === 'response.done') { log('agent finalize on response.done'); if (agentRow) { try { upsertAgentTranscript('', true); } catch (_) {} } agentRespId = null; }
+
+      // Half-duplex gating based on audio events
       if (msg.type === 'output_audio_buffer.started') { log('audio.buffer.started'); }
       if (msg.type === 'output_audio_buffer.cleared') { log('audio.buffer.cleared'); }
       if (msg.type === 'response.output_audio.done') { log('audio.output.done'); }
