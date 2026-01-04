@@ -22,16 +22,9 @@ Precautions:
 * no capabilities
 * read only filesystem
 * no local network or tailscale access (internet access is generally needed)
-
-TODO(psn):
-
+* openai key not in env
 * limit cpu and memory
-* limit access to openai key in env
-
 
 ## TODO(psn):
 
 * transscript  - include human
-* documentation on the page
-* documenrt lockdown
-

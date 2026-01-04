@@ -10,8 +10,10 @@ import (
 	"log/slog"
 	"mime/multipart"
 	"net/http"
+	"net"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 )
 
@@ -47,6 +49,29 @@ var session = []byte(`
   ]
 }`)
 
+// clientIP extracts the best-effort client IP from the request, preferring
+// X-Forwarded-For and X-Real-IP when present, otherwise falling back to
+// the remote address.
+func clientIP(r *http.Request) string {
+    if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+        parts := strings.Split(xff, ",")
+        for _, p := range parts {
+            p = strings.TrimSpace(p)
+            if p != "" {
+                return p
+            }
+        }
+    }
+    if xr := r.Header.Get("X-Real-IP"); xr != "" {
+        return xr
+    }
+    host, _, err := net.SplitHostPort(r.RemoteAddr)
+    if err == nil && host != "" {
+        return host
+    }
+    return r.RemoteAddr
+}
+
 func main() {
 	fmt.Println("vim-go")
 	openAIKey := os.Getenv("OPENAI_API_KEY")
@@ -58,6 +83,7 @@ func main() {
 	}
 
 	logHandler := func(w http.ResponseWriter, req *http.Request) {
+		l := slog.With("ip", clientIP(req))
 		if req.Method != "POST" {
 			io.WriteString(w, "Hello from a HandleFunc #2!\n")
 			w.WriteHeader(500)
@@ -65,21 +91,22 @@ func main() {
 		}
 		data, err := io.ReadAll(req.Body)
 		if err != nil {
-			slog.Error("failed", "err", err)
+			l.Error("failed", "err", err)
 			w.WriteHeader(500)
 			return
 		}
 		var cmdreq LogReq
 		if err := json.Unmarshal(data, &cmdreq); err != nil {
-			slog.Error("failed", "err", err)
+			l.Error("failed", "err", err)
 			w.WriteHeader(500)
 			return
 		}
-		slog.Info("req", "msg", cmdreq)
+		l.Info("req", "msg", cmdreq)
 		return
 	}
 
 	sessionHandler := func(w http.ResponseWriter, req *http.Request) {
+		l := slog.With("ip", clientIP(req))
 		if req.Method != "POST" {
 			io.WriteString(w, "Hello from a HandleFunc #2!\n")
 			w.WriteHeader(500)
@@ -89,7 +116,7 @@ func main() {
 
 		sdp, err := io.ReadAll(req.Body)
 		if err != nil {
-			slog.Error("failed", "err", err)
+			l.Error("failed", "err", err)
 			w.WriteHeader(500)
 			return
 		}
@@ -98,14 +125,14 @@ func main() {
 		writer := multipart.NewWriter(form)
 		ff, err := writer.CreateFormField("sdp")
 		if err != nil {
-			slog.Error("failed", "err", err)
+			l.Error("failed", "err", err)
 			w.WriteHeader(500)
 			return
 		}
 		ff.Write(sdp)
 		ff, err = writer.CreateFormField("session")
 		if err != nil {
-			slog.Error("failed", "err", err)
+			l.Error("failed", "err", err)
 			w.WriteHeader(500)
 			return
 		}
@@ -114,16 +141,16 @@ func main() {
 
 		oaiReq, err := http.NewRequestWithContext(ctx, "POST", "https://api.openai.com/v1/realtime/calls", form)
 		if err != nil {
-			slog.Error("failed", "err", err)
+			l.Error("failed", "err", err)
 			w.WriteHeader(500)
 			return
 		}
-		slog.Info("request", "form data", form)
+		l.Info("request", "form data", form)
 		oaiReq.Header["Authorization"] = []string{"Bearer " + openAIKey}
 		oaiReq.Header.Set("Content-Type", writer.FormDataContentType())
 		resp, err := http.DefaultClient.Do(oaiReq)
 		if err != nil {
-			slog.Error("failed", "err", err)
+			l.Error("failed", "err", err)
 			w.WriteHeader(500)
 			return
 		}
@@ -134,16 +161,17 @@ func main() {
 		}
 		sdpResp, err := io.ReadAll(resp.Body)
 		if err != nil {
-			slog.Error("failed", "err", err)
+			l.Error("failed", "err", err)
 			w.WriteHeader(500)
 			return
 		}
 
-		slog.Info("response", "sdp", sdpResp)
+		l.Info("response", "sdp", sdpResp)
 		w.Write(sdpResp)
 		return
 	}
 	toolsHandler := func(w http.ResponseWriter, req *http.Request) {
+		l := slog.With("ip", clientIP(req))
 		if req.Method != "POST" {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -151,13 +179,13 @@ func main() {
 		ctx := req.Context()
 		data, err := io.ReadAll(req.Body)
 		if err != nil {
-			slog.Error("failed", "err", err)
+			l.Error("failed", "err", err)
 			w.WriteHeader(500)
 			return
 		}
 		var cmdreq CmdReq
 		if err := json.Unmarshal(data, &cmdreq); err != nil {
-			slog.Error("failed", "err", err)
+			l.Error("failed", "err", err)
 			w.WriteHeader(500)
 			return
 		}
@@ -166,10 +194,20 @@ func main() {
 			http.Error(w, "missing command", http.StatusBadRequest)
 			return
 		}
-		slog.Info("tools request", "cmd", cmdreq)
+		l.Info("tools request", "cmd", cmdreq)
 		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 		cmd := exec.CommandContext(ctx, cmdreq.Command[0], cmdreq.Command[1:]...)
+        // Remove OPENAI_API_KEY from the environment passed to tools
+        baseEnv := os.Environ()
+        filtered := make([]string, 0, len(baseEnv))
+        for _, kv := range baseEnv {
+            if len(kv) >= len("OPENAI_API_KEY=") && kv[:len("OPENAI_API_KEY=")] == "OPENAI_API_KEY=" {
+                continue
+            }
+            filtered = append(filtered, kv)
+        }
+        cmd.Env = filtered
 		var stdoutBuf, stderrBuf bytes.Buffer
 		cmd.Stdout = &stdoutBuf
 		cmd.Stderr = &stderrBuf
@@ -193,9 +231,9 @@ func main() {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(&out); err != nil {
-			slog.Error("failed to write response", "err", err)
+			l.Error("failed to write response", "err", err)
 		}
-		slog.Info("tools response", "ok", out.OK, "code", out.ExitCode, "stdout", string(out.Stdout), "stderr", string(out.Stderr), "err", out.Error)
+		l.Info("tools response", "ok", out.OK, "code", out.ExitCode, "stdout", string(out.Stdout), "stderr", string(out.Stderr), "err", out.Error)
 	}
 
 	http.HandleFunc("/session", sessionHandler)

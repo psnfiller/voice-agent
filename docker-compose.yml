@@ -64,7 +64,7 @@ services:
       nproc: 256
       nofile: 16384
     cpus: "1.0"
-    mem_limit: 512m
+    mem_limit: 1g
     ipc: "none"
 
 volumes:

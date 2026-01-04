@@ -122,6 +122,36 @@ async function main() {
   const dc = pc.createDataChannel('oai-events');
   dc.onopen = () => { log('Data channel open'); setReady(true, 'Ready. Start speaking.'); };
   const transcriptEl = document.getElementById('transcript');
+  log('transcriptEl present', !!transcriptEl);
+  // Track in-progress user transcription rows by item id (top-level scope)
+  const userRows = new Map();
+  function upsertUserTranscript(itemId, text, done) {
+    try {
+      log('upsertUserTranscript', { itemId, len: (String(text||'').length), done });
+      if (!transcriptEl) return;
+      let row = userRows.get(itemId);
+      if (!row) {
+        row = document.createElement('div');
+        row.style.margin = '0.25rem 0';
+        const who = document.createElement('span');
+        who.style.color = '#9cf';
+        who.style.fontWeight = '600';
+        who.textContent = 'User: ';
+        const span = document.createElement('span');
+        span.className = 'user-text';
+        row.appendChild(who);
+        row.appendChild(span);
+        transcriptEl.appendChild(row);
+        userRows.set(itemId, row);
+      }
+      const span = row.querySelector('.user-text');
+      if (span) span.textContent = String(text || '');
+      transcriptEl.scrollTop = transcriptEl.scrollHeight;
+      if (done) {
+        userRows.delete(itemId);
+      }
+    } catch (_) {}
+  }
   function appendTranscript(role, text) {
     try {
       if (!transcriptEl) return;
@@ -263,10 +293,16 @@ Error: ${errStr}` : "";
       const msg = JSON.parse(event.data);
       console.log('DC message type:', msg?.type);
 
-      // Capture user speech recognized by the model
-      if (msg && msg.type === 'conversation.item.input_audio_transcription.completed') {
-        const text = msg?.transcript || msg?.text || '';
-        if (text) appendTranscript('user', text);
+      // Capture user speech recognized by the model (robust across event variants)
+      if (msg && typeof msg.type === 'string' && (msg.type.includes('input_audio_transcription') || msg.type.includes('input_text'))) {
+        const t = msg.type;
+        const isDelta = t.endsWith('delta');
+        const isCompleted = t.endsWith('completed') || t.endsWith('done');
+        const itemId = msg.item_id || (msg.item && msg.item.id) || msg.id || 'no-id';
+        const text = (isDelta ? (msg.delta || msg.text || '') : (msg.transcript || msg.text || '')) || '';
+        log('user transcription event', { type: t, itemId, isDelta, isCompleted, hasDelta: !!msg.delta, hasTranscript: !!msg.transcript, textLen: String(text||'').length });
+        if (text) upsertUserTranscript(itemId, text, isCompleted);
+        else log('no text in transcription event', { type: t, itemId });
         return;
       }
 
@@ -301,8 +337,8 @@ Error: ${errStr}` : "";
       if (!msg || typeof msg !== 'object') return;
 
       // Capture agent TTS transcript events (audio transcript)
-      if (msg.type === 'response.output_audio_transcript.delta' && msg?.delta) { appendTranscript('agent', msg.delta); }
-      if (msg.type === 'response.output_audio_transcript.done' && msg?.transcript) { appendTranscript('agent', msg.transcript); }
+      if (msg.type === 'response.output_audio_transcript.delta' && msg?.delta) { log('agent transcript delta', { len: String(msg.delta||'').length }); appendTranscript('agent', msg.delta); }
+      if (msg.type === 'response.output_audio_transcript.done' && msg?.transcript) { log('agent transcript done', { len: String(msg.transcript||'').length }); appendTranscript('agent', msg.transcript); }
 
       // Half-duplex gating based on audio events
       try {
